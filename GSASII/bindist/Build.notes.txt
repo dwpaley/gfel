@@ -1,0 +1,6 @@
+Created 2018-08-02T10:05:22.502203 on webvm-j1
+Built with Jeeves from Py3-L64-Build from G2 version 3522 on linux64 master
+Red Hat Enterprise Linux Server release 7.5 (Maipo)
+python                    3.6.6                hc3d631a_0  
+numpy                     1.15.0           py36h1b885b7_0  
+gfortran_linux-64         7.2.0               h550dcbe_27  
