@@ -1,3 +1,4 @@
+import sys
 from cctbx import crystal, miller
 
 from random import gauss
@@ -6,6 +7,7 @@ import pickle
 nref = int(sys.argv[1])
 noise = float(sys.argv[2])
 out_name = sys.argv[3]
+skip_first_n = int(sys.argv[4])
 
 
   
@@ -17,9 +19,10 @@ d_spacings = ms.sort().d_spacings().data()
 n_per_d = int(nref / d_spacings.size())
 
 result = []
-for d_spacing in d_spacings:
-  for i in range(n_per_d):
-    d = d_spacing + gauss(0, noise * d_spacing)
+for i in range(d_spacings.size()):
+  for j in range(n_per_d):
+    d = d_spacings[i]
+    if i>skip_first_n: d += gauss(0, noise * d_spacings[i])
     result.append(d)
 
 with open(out_name, 'wb') as f: pickle.dump(result, f)

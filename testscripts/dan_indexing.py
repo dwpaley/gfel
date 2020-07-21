@@ -1,5 +1,3 @@
-import sys
-sys.path.append('/Users/dwpaley/miniconda3/envs/gsasii/GSASII/')
 
 import GSASIIindex as gi
 from cctbx import crystal, miller
