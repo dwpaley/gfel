@@ -859,6 +859,9 @@ def findBestCell(dlg,ncMax,A,Ntries,ibrav,peaks,V1,ifX20=True):
             Abeg = ranAbyV(ibrav,amin,amax,V1)
         HKL = G2lat.GenHBravais(dmin,ibrav,Abeg)
         Nc = len(HKL)
+        if Nc < len(peaks):
+            A = [x/2 for x in Abeg]
+            continue
         if Nc >= ncMax:
             GoOn = False
         else:
@@ -930,7 +933,7 @@ def DoIndexPeaks(peaks,controls,bravais,dlg,ifX20=True):
         'Orthorhombic-B','Orthorhombic-C',
         'Orthorhombic-P','Monoclinic-I','Monoclinic-C','Monoclinic-P','Triclinic']
     tries = ['1st','2nd','3rd','4th','5th','6th','7th','8th','9th','10th']
-    N1s = [1,1,1,   5,5,  5,5, 50,50,50,50,50,50,  100,100,100, 200]
+    N1s = [1,1,1,   5,5,  5,5, 50,50,50,50,50,50,  10,10,10, 200]
     N2s = [1,1,1,   2,2,  2,2,     2,2,2,2,2,2,   2,2,2,   4]
     Nm  = [1,1,1,   1,1,  1,1,     1,1,1,1,1,1,   2,2,2,   4]
     notUse = 0
@@ -953,7 +956,7 @@ def DoIndexPeaks(peaks,controls,bravais,dlg,ifX20=True):
             bestM20 = 0
             topM20 = 0
             cycle = 0
-            while cycle < 5:
+            while cycle < 1:
                 if dlg:
                     dlg.Raise()
                     dlg.Update(0,newmsg=tries[cycle]+" cell search for "+bravaisNames[ibrav])
