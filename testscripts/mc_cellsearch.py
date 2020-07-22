@@ -1,26 +1,72 @@
 import pickle, random
+import sys
 import GSASIIindex as gi
+from libtbx import easy_mp
+from cctbx import uctbx
 
 
-REFLS = '20k_0p1_2.pkl'
+REFLS = '0p5_1.pkl'
 N_UNIQ = 300
 N_TOTAL = 10000
-OUT_FILE = 'cells.pkl'
+CELL_FILE = 'cells.pkl'
 OVERLAP_TOL_FRAC = .01
 N_SEARCH_PEAKS = 30
 WAVL = 1.02
 
 class Candidate_cell(object):
-  def __init__(gcell_list):
+  def __init__(self, gcell):
     from cctbx import uctbx
-    self.uc = uctbx.unit_cell(gcell_list[3:9])
-    self.hits = [gcell_list]
+    self.uc = uctbx.unit_cell(gcell[3:9])
+    self.hit_count = 1
+    self.hits = [gcell]
+    self.best_score = self.cumul_score = self.hit_score(gcell)
 
-  def matches_cell(uc2):
+  def matches_cell(self, uc2):
     return True if self.uc.similarity_transformations(uc2).size() > 0 else False
 
-  def store_hit(gcell_list):
-    self.hits.append(gcell_list)
+  def store_hit(self, gcell):
+    self.hits.append(gcell)
+    self.hit_count += 1
+    score = self.hit_score(gcell)
+    self.cumul_score += score
+    if score > self.best_score: self.best_score = score
+
+  def average_score(self):
+    return self.cumul_score / self.hit_count
+
+  @classmethod
+  def hit_score(cls, gcell):
+    m20, x20, nc = gcell[0:3]
+    return m20/nc/(x20+1)
+
+class Candidate_cell_manager(object):
+  def __init__(self):
+    self.cells = []
+    self.min_score = 0
+
+  def maintain(self, force=False):
+    if len(self.cells) > 30 or force:
+      self.cells.sort(key=lambda x: x.cumul_score, reverse=True)
+      self.cells = self.cells[:20]
+      self.min_score = min([c.average_score() for c in self.cells])
+
+  def store_cell(self,gcell):
+    self.maintain()
+    uc = uctbx.unit_cell(gcell[3:9])
+    score = Candidate_cell.hit_score(gcell)
+    if score > self.min_score:
+      found_match = False
+      for cell in self.cells:
+        if cell.matches_cell(uc):
+          cell.store_hit(gcell)
+          found_match = True
+          break
+      if not found_match:
+        self.cells.append(Candidate_cell(gcell))
+
+    
+
+
 
 
 def gpeak_from_miller_set(ms, i_peak, wavl):
@@ -37,11 +83,11 @@ def gpeak_from_d_spacing(d, wavl):
   return [twoth, 1000, True, False, 0, 0, 0, d, 0]
 
 
-with open(REFLS, 'rb') as f: refls = pickle.load(f)
 
 
-while True:
+def call_gsas(min_score=None):
   trial_set = random.choices(refls, k=N_UNIQ)
+  trial_set.sort(reverse=True)
 
   # Filter out overlapping reflections. Randomly filter one of the pair
   # to avoid bias
@@ -60,20 +106,46 @@ while True:
 
   success, dmin, cells = gi.DoIndexPeaks(trial_peaks, controls, bravais, None)
 
-  from cctbx import uctbx
-  with open(OUT_FILE, 'rb+') as f:
-    candidates = pickle.load(f)
-    for cell in cells:
-      done = False
-      uc = uctbx.unit_cell(cell[3:9])
-      for cand in candidates:
-        if cand.matches_cell(uc):
-          cand.store_hit(cell)
-          done = True
-          break
-      if not done:
-        candidates.append(Candidate_cell(cell))
-    pickle.dump(candidates, f)
+  if min_score:
+    cells = [c for c in cells if Candidate_cell.hit_score(c) > min_score]
+  return cells
+
+
+#comm.gather(all_cells, dest=0)
+#comm.reduce(n, dest=0)
+#if rank==0:
+#  pass
+if __name__=='__main__':
+  with open(REFLS, 'rb') as f: refls = pickle.load(f)
+
+  current_cells = easy_mp.parallel_map(
+      call_gsas, 
+      [None for _ in range(32)], 
+      processes=32)
+
+  cell_man = Candidate_cell_manager()
+
+  current_cells_flat = []
+  for l in current_cells: current_cells_flat.extend(l)
+  for gcell in current_cells_flat:
+    cell_man.store_cell(gcell)
+  cell_man.maintain(force=True)
+  min_score = cell_man.min_score
+
+
+  current_cells = easy_mp.parallel_map(
+      call_gsas,
+      [min_score for _ in range(1000)],
+      processes=32)
+
+
+  current_cells_flat = []
+  for l in current_cells: current_cells_flat.extend(l)
+  for gcell in current_cells_flat:
+    cell_man.store_cell(gcell)
+  cell_man.maintain(force=True)
+
+  with open(sys.argv[1], 'wb') as f: pickle.dump(cell_man, f)
 
       
 
