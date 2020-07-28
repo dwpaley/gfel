@@ -7,7 +7,8 @@ import pickle
 nref = int(sys.argv[1])
 noise = float(sys.argv[2])
 out_name = sys.argv[3]
-skip_first_n = int(sys.argv[4])
+OMIT_I_LIST = [0]
+NO_NOISE_I_LIST = [1, 2, 5, 10, 15, 20]
 
 
   
@@ -22,8 +23,8 @@ result = []
 for i in range(d_spacings.size()):
   for j in range(n_per_d):
     d = d_spacings[i]
-    if i>skip_first_n: d += gauss(0, noise * d_spacings[i])
-    result.append(d)
+    if i not in NO_NOISE_I_LIST: d += gauss(0, noise * d_spacings[i])
+    if i not in OMIT_I_LIST: result.append(d)
 
 with open(out_name, 'wb') as f: pickle.dump(result, f)
 print("{} reflections generated from {} unique. Result saved to {}".format(
