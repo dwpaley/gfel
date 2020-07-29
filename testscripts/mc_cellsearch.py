@@ -13,6 +13,7 @@ CELL_FILE = 'cells.pkl'
 OVERLAP_TOL_FRAC = .01
 N_SEARCH_PEAKS = 30
 WAVL = 1.02
+NPROC = 8
 
 class Candidate_cell(object):
   def __init__(self, gcell):
@@ -86,18 +87,34 @@ def gpeak_from_d_spacing(d, wavl):
 
 
 
-def call_gsas(min_score=None):
+def call_gsas(refls, known_good, min_score=None):
+  ''' 
+  refls and known_good are lists of d-spacings. The idea is that refls
+  will be the full list of noisy d-spacings measured from individual frames,
+  while known_good will be a short list of sharp peaks accurately measured
+  from the radial average. We will use the full list of known_good plus a
+  random sample of refls.
+  '''
   trial_set = random.choices(refls, k=N_UNIQ)
   trial_set.sort(reverse=True)
 
-  # Filter out overlapping reflections. Randomly filter one of the pair
+  # Filter out overlaps between random refls. Randomly filter one of the pair
   # to avoid bias
   to_skip = []
   for i in range(1, len(trial_set)):
     if (abs(trial_set[i]-trial_set[i-1]) / trial_set[i]) < OVERLAP_TOL_FRAC:
       to_skip.append(i-1 if random.random()>.5 else i)
+  # Now filter out overlaps between random and known good.
+  for i in range(len(trial_set)):
+    for d in known_good:
+      if (abs(trial_set[i]-d) / trial_set[i]) < OVERLAP_TOL_FRAC:
+        to_skip.append(i)
+        break
   trial_set = [trial_set[i] for i in range(len(trial_set)) if i not in to_skip]
-  trial_set = trial_set[:N_SEARCH_PEAKS]
+
+  trial_set = trial_set[0:(N_SEARCH_PEAKS-len(known_good))]
+  trial_set.extend(known_good)
+  trial_set.sort(reverse=True)
   trial_peaks = [gpeak_from_d_spacing(d, WAVL) for d in trial_set]
 
   # lattice codes at the bottom of the file
@@ -116,14 +133,14 @@ def call_gsas(min_score=None):
 #comm.reduce(n, dest=0)
 #if rank==0:
 #  pass
-if __name__=='__main__':
+def run():
   with open(REFLS, 'rb') as f: refls = pickle.load(f)
   with open(KNOWN_GOOD, 'rb') as f: known_good = pickle.load(f)
 
   current_cells = easy_mp.parallel_map(
       call_gsas, 
-      [(refls, None,  for _ in range(32)], 
-      processes=32)
+      [(refls, known_good, None) for _ in range(NPROC)], 
+      processes=NPROC)
 
   cell_man = Candidate_cell_manager()
 
@@ -137,8 +154,8 @@ if __name__=='__main__':
 
   current_cells = easy_mp.parallel_map(
       call_gsas,
-      [min_score for _ in range(1000)],
-      processes=32)
+      [(refls, known_good, min_score) for _ in range(NPROC*2)],
+      processes=NPROC)
 
 
   current_cells_flat = []
@@ -149,27 +166,28 @@ if __name__=='__main__':
 
   with open(sys.argv[1], 'wb') as f: pickle.dump(cell_man, f)
 
-      
+
+if __name__=='__main__':
+  run()
 
 
-
-
-lattices = """
-            * 0 F cubic
-            * 1 I cubic
-            * 2 P cubic
-            * 3 R hexagonal (trigonal not rhombohedral)
-            * 4 P hexagonal
-            * 5 I tetragonal
-            * 6 P tetragonal
-            * 7 F orthorhombic
-            * 8 I orthorhombic
-            * 9 A orthorhombic
-            * 10 B orthorhombic
-            * 11 C orthorhombic
-            * 12 P orthorhombic
-            * 13 I monoclinic
-            * 14 C monoclinic
-            * 15 P monoclinic
-            * 16 P triclinic
-            """
+def lattices():
+  lattices = """
+              * 0 F cubic
+              * 1 I cubic
+              * 2 P cubic
+              * 3 R hexagonal (trigonal not rhombohedral)
+              * 4 P hexagonal
+              * 5 I tetragonal
+              * 6 P tetragonal
+              * 7 F orthorhombic
+              * 8 I orthorhombic
+              * 9 A orthorhombic
+              * 10 B orthorhombic
+              * 11 C orthorhombic
+              * 12 P orthorhombic
+              * 13 I monoclinic
+              * 14 C monoclinic
+              * 15 P monoclinic
+              * 16 P triclinic
+              """
