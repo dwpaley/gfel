@@ -5,8 +5,8 @@ from libtbx import easy_mp
 from cctbx import uctbx
 
 
-REFLS = '20k_0p5_omits_skips.pkl'
-KNOWN_GOOD = '20k_0p5_omits_skips_good.pkl'
+REFLS = '20k_0p5_all.pkl'
+KNOWN_GOOD = '20k_0p5_good.pkl'
 N_UNIQ = 300
 N_TOTAL = 10000
 CELL_FILE = 'cells.pkl'
@@ -87,7 +87,7 @@ def gpeak_from_d_spacing(d, wavl):
 
 
 
-def call_gsas(refls, known_good, min_score=None):
+def call_gsas(args):
   ''' 
   refls and known_good are lists of d-spacings. The idea is that refls
   will be the full list of noisy d-spacings measured from individual frames,
@@ -95,6 +95,12 @@ def call_gsas(refls, known_good, min_score=None):
   from the radial average. We will use the full list of known_good plus a
   random sample of refls.
   '''
+  
+  refls = args[0]
+  known_good = args[1]
+  min_score = args[2]
+
+
   trial_set = random.choices(refls, k=N_UNIQ)
   trial_set.sort(reverse=True)
 
