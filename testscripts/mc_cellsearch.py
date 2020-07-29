@@ -5,7 +5,8 @@ from libtbx import easy_mp
 from cctbx import uctbx
 
 
-REFLS = '0p5_1.pkl'
+REFLS = '20k_0p5_omits_skips.pkl'
+KNOWN_GOOD = '20k_0p5_omits_skips_good.pkl'
 N_UNIQ = 300
 N_TOTAL = 10000
 CELL_FILE = 'cells.pkl'
@@ -117,10 +118,11 @@ def call_gsas(min_score=None):
 #  pass
 if __name__=='__main__':
   with open(REFLS, 'rb') as f: refls = pickle.load(f)
+  with open(KNOWN_GOOD, 'rb') as f: known_good = pickle.load(f)
 
   current_cells = easy_mp.parallel_map(
       call_gsas, 
-      [None for _ in range(32)], 
+      [(refls, None,  for _ in range(32)], 
       processes=32)
 
   cell_man = Candidate_cell_manager()
