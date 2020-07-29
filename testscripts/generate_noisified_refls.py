@@ -27,6 +27,7 @@ all_refls = []
 for i in range(d_spacings.size()):
   for j in range(n_per_d):
     d = d_spacings[i]
+    d += gauss(0, noise * d)
     if i not in OMIT_I_LIST: all_refls.append(d)
 
 good_refls = [d_spacings[i] for i in GOOD_I_LIST]
