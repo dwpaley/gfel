@@ -5,15 +5,15 @@ from libtbx import easy_mp
 from cctbx import uctbx
 
 
-REFLS = '20k_0p5_all.pkl'
-KNOWN_GOOD = '20k_0p5_good.pkl'
+REFLS = '../d_table.txt'
+KNOWN_GOOD = '../known_good.txt'
 N_UNIQ = 300
 N_TOTAL = 10000
 CELL_FILE = 'cells.pkl'
 OVERLAP_TOL_FRAC = .01
 N_SEARCH_PEAKS = 30
-WAVL = 1.02
-NPROC = 8
+WAVL = 1.03232
+NPROC = 60
 
 class Candidate_cell(object):
   def __init__(self, gcell):
@@ -97,11 +97,14 @@ def call_gsas(args):
   '''
   
   refls = args[0]
-  known_good = args[1]
-  min_score = args[2]
+  weights = args[1]
+  known_good_all = args[2]
+  min_score = args[3]
 
+  # Throw out 1/3 of known_good
+  known_good = [d for d in known_good_all if random.random() < 0.66]
 
-  trial_set = random.choices(refls, k=N_UNIQ)
+  trial_set = random.choices(refls, k=N_UNIQ, weights=weights)
   trial_set.sort(reverse=True)
 
   # Filter out overlaps between random refls. Randomly filter one of the pair
@@ -140,12 +143,18 @@ def call_gsas(args):
 #if rank==0:
 #  pass
 def run():
-  with open(REFLS, 'rb') as f: refls = pickle.load(f)
-  with open(KNOWN_GOOD, 'rb') as f: known_good = pickle.load(f)
+  with open(REFLS) as f:
+    refls, weights = [], []
+    for line in f.readlines():
+      d, w = [float(x) for x in line.strip().split(',')]
+      refls.append(d)
+      weights.append(w)
+  with open(KNOWN_GOOD) as f:
+    known_good = [float(line.strip()) for line in f.readlines()]
 
   current_cells = easy_mp.parallel_map(
       call_gsas, 
-      [(refls, known_good, None) for _ in range(NPROC)], 
+      [(refls, weights, known_good, None) for _ in range(NPROC)], 
       processes=NPROC)
 
   cell_man = Candidate_cell_manager()
@@ -160,7 +169,7 @@ def run():
 
   current_cells = easy_mp.parallel_map(
       call_gsas,
-      [(refls, known_good, min_score) for _ in range(NPROC*2)],
+      [(refls, weights, known_good, min_score) for _ in range(NPROC*2)],
       processes=NPROC)
 
 
