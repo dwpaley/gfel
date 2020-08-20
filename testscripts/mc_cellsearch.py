@@ -1,6 +1,6 @@
 import pickle, random
 import sys
-import GSASIIindex as gi
+import GSASIIindex_old as gi
 from libtbx import easy_mp
 from cctbx import uctbx
 
@@ -11,9 +11,10 @@ N_UNIQ = 300
 N_TOTAL = 10000
 CELL_FILE = 'cells.pkl'
 OVERLAP_TOL_FRAC = .01
-N_SEARCH_PEAKS = 30
+N_SEARCH_PEAKS = 20
 WAVL = 1.03232
 NPROC = 60
+
 
 class Candidate_cell(object):
   def __init__(self, gcell):
@@ -84,7 +85,63 @@ def gpeak_from_d_spacing(d, wavl):
   twoth = d_star_sq_as_two_theta(d_as_d_star_sq(d), wavl, deg=True)
   return [twoth, 1000, True, False, 0, 0, 0, d, 0]
 
+def prepare_trial_peaks(refls, known_good_all):
+  # Throw out 1/3 of known_good
+  known_good = random.sample(known_good_all, len(known_good_all)*2//3)
 
+  trial_set = random.choices(refls, k=N_UNIQ)
+  trial_set.sort(reverse=True)
+
+  # Find groups of overlapping d-spacings. Keep only 1 of each group.
+  i = 0
+  i_to_keep = []
+  while i<len(trial_set):
+    i_matches = []
+    datum = trial_set[i]
+    while i<len(trial_set) and ((datum - trial_set[i]) / datum) < OVERLAP_TOL_FRAC:
+      i_matches.append(i)
+      i += 1
+    i_to_keep.append(random.choice(i_matches))
+  trial_set = [trial_set[i] for i in range(len(trial_set)) if i in i_to_keep]
+      
+  # Now filter out overlaps between random and known good.
+  i_to_skip = []
+  for i in range(len(trial_set)):
+    for d in known_good:
+      if (abs(trial_set[i]-d) / trial_set[i]) < OVERLAP_TOL_FRAC:
+        i_to_skip.append(i)
+        break
+  trial_set = [trial_set[i] for i in range(len(trial_set)) if i not in i_to_skip]
+
+
+  
+
+#  # Filter out overlaps between random refls. Randomly filter one of the pair
+#  # to avoid bias
+#  to_skip = []
+#  for i in range(1, len(trial_set)):
+#    if (abs(trial_set[i]-trial_set[i-1]) / trial_set[i]) < OVERLAP_TOL_FRAC:
+#      to_skip.append(i-1 if random.random()>.5 else i)
+#  # Now filter out overlaps between random and known good.
+#  for i in range(len(trial_set)):
+#    for d in known_good:
+#      if (abs(trial_set[i]-d) / trial_set[i]) < OVERLAP_TOL_FRAC:
+#        to_skip.append(i)
+#        break
+#  trial_set = [trial_set[i] for i in range(len(trial_set)) if i not in to_skip]
+
+  trial_set = random.sample(trial_set, N_SEARCH_PEAKS-len(known_good))
+  trial_set.extend(known_good)
+  trial_set.sort(reverse=True)
+  trial_peaks = [gpeak_from_d_spacing(d, WAVL) for d in trial_set]
+  return trial_peaks
+
+
+def prepare_good_peaks(known_good_all):
+  assert len(known_good_all) >= N_SEARCH_PEAKS
+  trial_set = sorted(random.sample(known_good_all, N_SEARCH_PEAKS), reverse=True)
+  trial_peaks = [gpeak_from_d_spacing(d, WAVL) for d in trial_set]
+  return trial_peaks
 
 
 def call_gsas(args):
@@ -101,35 +158,14 @@ def call_gsas(args):
   known_good_all = args[2]
   min_score = args[3]
 
-  # Throw out 1/3 of known_good
-  known_good = [d for d in known_good_all if random.random() < 0.66]
+  #trial_peaks = prepare_trial_peaks(refls, known_good_all)
+  trial_peaks = prepare_good_peaks(known_good_all)
 
-  trial_set = random.choices(refls, k=N_UNIQ, weights=weights)
-  trial_set.sort(reverse=True)
-
-  # Filter out overlaps between random refls. Randomly filter one of the pair
-  # to avoid bias
-  to_skip = []
-  for i in range(1, len(trial_set)):
-    if (abs(trial_set[i]-trial_set[i-1]) / trial_set[i]) < OVERLAP_TOL_FRAC:
-      to_skip.append(i-1 if random.random()>.5 else i)
-  # Now filter out overlaps between random and known good.
-  for i in range(len(trial_set)):
-    for d in known_good:
-      if (abs(trial_set[i]-d) / trial_set[i]) < OVERLAP_TOL_FRAC:
-        to_skip.append(i)
-        break
-  trial_set = [trial_set[i] for i in range(len(trial_set)) if i not in to_skip]
-
-  trial_set = trial_set[0:(N_SEARCH_PEAKS-len(known_good))]
-  trial_set.extend(known_good)
-  trial_set.sort(reverse=True)
-  trial_peaks = [gpeak_from_d_spacing(d, WAVL) for d in trial_set]
 
   # lattice codes at the bottom of the file
   bravais = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,True,0,0]
   # The controls are magic
-  controls = [0, 0.0, 4, 200, 0, 'P1', 1.0, 1.0, 1.0, 90.0, 90.0, 90.0, 1.0, 'P 1', []]
+  controls = [0, 0.0, 4, 800, 0, 'P1', 1.0, 1.0, 1.0, 90.0, 90.0, 90.0, 1.0, 'P 1', []]
 
   success, dmin, cells = gi.DoIndexPeaks(trial_peaks, controls, bravais, None)
 
@@ -152,6 +188,9 @@ def run():
   with open(KNOWN_GOOD) as f:
     known_good = [float(line.strip()) for line in f.readlines()]
 
+#  import profile
+#  profile.runctx('call_gsas((refls, weights, known_good, None))', globals(), locals(), filename='call_gsas.prof')
+#  quit()
   current_cells = easy_mp.parallel_map(
       call_gsas, 
       [(refls, weights, known_good, None) for _ in range(NPROC)], 
@@ -169,7 +208,7 @@ def run():
 
   current_cells = easy_mp.parallel_map(
       call_gsas,
-      [(refls, weights, known_good, min_score) for _ in range(NPROC*2)],
+      [(refls, weights, known_good, min_score) for _ in range(NPROC*3)],
       processes=NPROC)
 
 
@@ -183,7 +222,9 @@ def run():
 
 
 if __name__=='__main__':
-  run()
+  from ipdb import launch_ipdb_on_exception
+  with launch_ipdb_on_exception():
+    run()
 
 
 def lattices():
