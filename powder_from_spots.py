@@ -12,6 +12,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.ticker as tick
 
+import pickle
+
 logger = logging.getLogger("dials.command_line.powder_from_spots")
 
 help_message = """
@@ -86,8 +88,18 @@ phil_scope = parse(
     .type = space_group
     .help = Show positions of miller indices from this unit_cell and space \
             group.
+  peak_position = xyzobs
+    .type = str
+  peak_weighting = unit
+    .type = str
+  split_detectors = False
+    .type = bool
 output {
   log = dials.powder_from_spots.log
+    .type = str
+  d_table = d_table.pkl
+    .type = str
+  xy_file = None
     .type = str
 }
 """
@@ -122,13 +134,32 @@ class Script(object):
     d_max, d_min = params.d_max, params.d_min
     d_inv_low, d_inv_high = 1/d_max, 1/d_min
 
-    sums = flex.double(params.n_bins)
+    #sums = flex.double(params.n_bins)
+
+    sums0 = flex.double(params.n_bins)
+    sums1 = flex.double(params.n_bins)
+    sums2 = flex.double(params.n_bins)
+    sums3 = flex.double(params.n_bins)
+    sums4 = flex.double(params.n_bins)
+    sums5 = flex.double(params.n_bins)
+    sums6 = flex.double(params.n_bins)
+    sums7 = flex.double(params.n_bins)
+    panelsums = {
+        0: sums0,
+        1: sums1,
+        2: sums2,
+        3: sums3,
+        4: sums4,
+        5: sums5,
+        6: sums6,
+        7: sums7,
+        }
+    d_table = []
 
     refls = params.input.reflections[0].data
     expts = params.input.experiments[0].data
 
     import random
-    print(len(expts))
     for i, expt in enumerate(expts):
         if random.random() < 0.01: print("experiment ", i)
 
@@ -143,46 +174,52 @@ class Script(object):
 
         for i_refl in range(len(refls_sel)):
             i_panel = panels[i_refl]
+            #if i_panel not in [1,2,5,6]: continue
             panel = expt.detector[i_panel]
             sb = shoeboxes[i_refl]
             sbpixels = zip(sb.coords(), sb.values())
 
-#            xy = xyzobses[i_refl][0:2]
-#            intensity = intensities[i_refl]
-#            res = panel.get_resolution_at_pixel(s0, xy)
-#            res_inv = 1/res
-#            i_bin = int(n_bins * (res_inv - d_inv_low) / (d_inv_high - d_inv_low))
-#            if i_bin < 0 or i_bin >= n_bins: continue
-#            sums[i_bin] += intensity
-            for (x,y,_), intensity in sbpixels:
-                res = panel.get_resolution_at_pixel(s0, (x,y))
+            
+            xy = xyzobses[i_refl][0:2]
+            intensity = intensities[i_refl]
+            res = panel.get_resolution_at_pixel(s0, xy)
+            d_table.append((res, intensity))
+            if params.peak_position=="xyzobs":
                 res_inv = 1/res
                 i_bin = int(n_bins * (res_inv - d_inv_low) / (d_inv_high - d_inv_low))
                 if i_bin < 0 or i_bin >= n_bins: continue
-                sums[i_bin] += intensity
+                panelsums[i_panel][i_bin] += intensity if params.peak_weighting=="intensity" else 1
+            if params.peak_position=="shoebox":
+                for (x,y,_), value in sbpixels:
+                    res = panel.get_resolution_at_pixel(s0, (x,y))
+                    res_inv = 1/res
+                    i_bin = int(n_bins * (res_inv - d_inv_low) / (d_inv_high - d_inv_low))
+                    if i_bin < 0 or i_bin >= n_bins: continue
+                    panelsums[i_panel][i_bin] += value if params.peak_weighting=="intensity" else 1
 
                 
-#        for i_refl in range(len(refls_sel)):
-#            xy = xyzobses[i_refl][0:2]
-#            i_panel = panels[i_refl]
-#            intensity = intensities[i_refl]
-#            panel = expt.detector[i_panel]
-#            res = panel.get_resolution_at_pixel(s0, xy)
-#            i_bin = int(n_bins * (res - d_max) / (d_min - d_max))
-#            if i_bin < 0 or i_bin >= n_bins: continue
-#            sums[i_bin] += intensity
 
     xvalues = np.linspace(d_inv_low, d_inv_high, n_bins)
-    yvalues = np.array(sums)
-    data = np.concatenate((xvalues, yvalues))
-    np.save('out', data)
     fig, ax = plt.subplots()
-    plt.plot(xvalues, yvalues)
+    if params.split_detectors:
+        offset = max(np.array(sums1))
+        for i_sums, sums in enumerate([sums1, sums2, sums5, sums6]):
+            yvalues = np.array(sums)
+            plt.plot(xvalues, yvalues+0.5*i_sums*offset)
+    else:
+        yvalues = sum([v for v in panelsums.values()])
+        plt.plot(xvalues, yvalues)
     ax.get_xaxis().set_major_formatter(tick.FuncFormatter(
         lambda x, _: "{:.3f}".format(1/x)))
-#    plt.xlim(d_max, d_min)
+
+    if params.output.xy_file:
+        with open(params.output.xy_file, 'w') as f:
+            for x,y in zip(xvalues, yvalues):
+                f.write("{:.6f}\t{}\n".format(1/x, y))
     plt.show()
 
+    with open(params.output.d_table, 'wb') as f:
+        pickle.dump(d_table, f)
 
 if __name__ == "__main__":
     with show_mail_on_error():
