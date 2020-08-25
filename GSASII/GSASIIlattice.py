@@ -50,6 +50,9 @@ import GSASIIpath
 import GSASIImath as G2mth
 import GSASIIspc as G2spc
 import GSASIIElem as G2elem
+
+from cctbx import sgtbx, uctbx, miller
+
 GSASIIpath.SetVersionNumber("$Revision: 4519 $")
 # trig functions in degrees
 sind = lambda x: np.sin(x*np.pi/180.)
@@ -1113,7 +1116,13 @@ def GetBraviasNum(center,system):
         return 15
     raise ValueError('non-standard Bravais lattice center=%s, cell=%s' % (center,system))
 
-def GenHBravais(dmin,Bravais,A):
+def make_sgtype(ibrav):
+    symmorphic_sgs = ['F23', 'I23', 'P23', 'R3', 'P3', 'I4', 'P4', 'F222', 
+        'I222', 'A222', 'B222', 'C222', 'P222', 'I2', 'C2', 'P2', 'P1']
+    return sgtbx.space_group_type(symmorphic_sgs[ibrav])
+
+
+def GenHBravais(dmin,Bravais,A, sg_type=None):
     """Generate the positionally unique powder diffraction reflections
      
     :param dmin: minimum d-spacing in A
@@ -1138,98 +1147,30 @@ def GenHBravais(dmin,Bravais,A):
             * 16 P triclinic
             
     :param A: reciprocal metric tensor elements as [G11,G22,G33,2*G12,2*G13,2*G23]
+    :param st_type: an sgtbx.space_group_type object. Constructing these is slow
+      so it's good to precalculate if possible.
     :return: HKL unique d list of [h,k,l,d,-1] sorted with largest d first
             
     """
-    if Bravais in [9,]:
-        Cent = 'A'
-    elif Bravais in [10,]:
-        Cent = 'B'
-    elif Bravais in [11,14]:
-        Cent = 'C'
-    elif Bravais in [1,5,8,13]:
-        Cent = 'I'
-    elif Bravais in [0,7]:
-        Cent = 'F'
-    elif Bravais in [3]:
-        Cent = 'R'
-    else:
-        Cent = 'P'
-    Hmax = MaxIndex(dmin,A)
-    dminsq = 1./(dmin**2)
-    HKL = []
-    if Bravais == 16:                       #triclinic
-        for l in range(-Hmax[2],Hmax[2]+1):
-            for k in range(-Hmax[1],Hmax[1]+1):
-                hmin = 0
-                if (k < 0): hmin = 1
-                if (k ==0 and l < 0): hmin = 1
-                for h in range(hmin,Hmax[0]+1):
-                    H=[h,k,l]
-                    rdsq = calc_rDsq(H,A)
-                    if 0 < rdsq <= dminsq:
-                        HKL.append([h,k,l,rdsq2d(rdsq,6),-1])
-    elif Bravais in [13,14,15]:                #monoclinic - b unique
-        Hmax = SwapIndx(2,Hmax)
-        for h in range(Hmax[0]+1):
-            for k in range(-Hmax[1],Hmax[1]+1):
-                lmin = 0
-                if k < 0:lmin = 1
-                for l in range(lmin,Hmax[2]+1):
-                    [h,k,l] = SwapIndx(-2,[h,k,l])
-                    H = []
-                    if CentCheck(Cent,[h,k,l]): H=[h,k,l]
-                    if H:
-                        rdsq = calc_rDsq(H,A)
-                        if 0 < rdsq <= dminsq:
-                            HKL.append([h,k,l,rdsq2d(rdsq,6),-1])
-                    [h,k,l] = SwapIndx(2,[h,k,l])
-    elif Bravais in [7,8,9,10,11,12]:            #orthorhombic
-        for h in range(Hmax[0]+1):
-            for k in range(Hmax[1]+1):
-                for l in range(Hmax[2]+1):
-                    H = []
-                    if CentCheck(Cent,[h,k,l]): H=[h,k,l]
-                    if H:
-                        rdsq = calc_rDsq(H,A)
-                        if 0 < rdsq <= dminsq:
-                            HKL.append([h,k,l,rdsq2d(rdsq,6),-1])
-    elif Bravais in [5,6]:                  #tetragonal
-        for l in range(Hmax[2]+1):
-            for k in range(Hmax[1]+1):
-                for h in range(k,Hmax[0]+1):
-                    H = []
-                    if CentCheck(Cent,[h,k,l]): H=[h,k,l]
-                    if H:
-                        rdsq = calc_rDsq(H,A)
-                        if 0 < rdsq <= dminsq:
-                            HKL.append([h,k,l,rdsq2d(rdsq,6),-1])
-    elif Bravais in [3,4]:
-        lmin = 0
-        if Bravais == 3: lmin = -Hmax[2]                  #hexagonal/trigonal
-        for l in range(lmin,Hmax[2]+1):
-            for k in range(Hmax[1]+1):
-                hmin = k
-                if l < 0: hmin += 1
-                for h in range(hmin,Hmax[0]+1):
-                    H = []
-                    if CentCheck(Cent,[h,k,l]): H=[h,k,l]
-                    if H:
-                        rdsq = calc_rDsq(H,A)
-                        if 0 < rdsq <= dminsq:
-                            HKL.append([h,k,l,rdsq2d(rdsq,6),-1])
-
-    else:                                   #cubic
-        for l in range(Hmax[2]+1):
-            for k in range(l,Hmax[1]+1):
-                for h in range(k,Hmax[0]+1):
-                    H = []
-                    if CentCheck(Cent,[h,k,l]): H=[h,k,l]
-                    if H:
-                        rdsq = calc_rDsq(H,A)
-                        if 0 < rdsq <= dminsq:
-                            HKL.append([h,k,l,rdsq2d(rdsq,6),-1])
-    return sortHKLd(HKL,True,False)
+    g_inv = np.array([[A[0],   A[3]/2, A[4]/2],
+                      [A[3]/2, A[1],   A[5]/2], 
+                      [A[4]/2, A[5]/2, A[2]]])
+    g = np.linalg.inv(g_inv)
+    g_elems = (g[0][0], g[1][1], g[2][2], g[0][1], g[0][2], g[1][2])
+    try:
+        uc = uctbx.unit_cell(metrical_matrix=g_elems)
+    except ValueError: # this function sometimes receives an A matrix that gives
+                       # numbers <0 in the diagonal elems of g. Not sure why.
+        return []
+    if sg_type is None:
+        sg_type = make_sgtype(Bravais)
+    mig = miller.index_generator(uc, sg_type, 0, dmin)
+    result = []
+    for h,k,l in mig: 
+      d = uc.d((h,k,l))
+      result.append([h, k, l, d, -1])
+    result.sort(key=lambda l: l[3], reverse=True)
+    return result
     
 def getHKLmax(dmin,SGData,A):
     'finds maximum allowed hkl for given A within dmin'
