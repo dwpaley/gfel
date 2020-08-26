@@ -27,6 +27,7 @@ import GSASIIpwd as G2pwd
 import GSASIIspc as G2spc
 import GSASIImath as G2mth
 import scipy.optimize as so
+from cctbx import sgtbx
 
 # trig functions in degrees
 sind = lambda x: math.sin(x*math.pi/180.)
@@ -794,7 +795,8 @@ def refinePeaks(peaks,ibrav,A,ifX20=True):
     maxTries = 10
     OK = False
     tries = 0
-    HKL = G2lat.GenHBravais(dmin,ibrav,A)
+    sgtype = G2lat.make_sgtype(ibrav)
+    HKL = G2lat.GenHBravais(dmin,ibrav,A, sg_type=sgtype)
     while len(HKL) > 2 and IndexPeaks(peaks,HKL)[0]:
         Pwr = pwr - (tries % 2)
         HKL = []
@@ -809,7 +811,7 @@ def refinePeaks(peaks,ibrav,A,ifX20=True):
             OK = False
             continue
         try:
-            HKL = G2lat.GenHBravais(dmin,ibrav,A)
+            HKL = G2lat.GenHBravais(dmin,ibrav,A, sgtype)
         except FloatingPointError:
             A = oldA
             OK = False
@@ -859,9 +861,6 @@ def findBestCell(dlg,ncMax,A,Ntries,ibrav,peaks,V1,ifX20=True):
             Abeg = ranAbyV(ibrav,amin,amax,V1)
         HKL = G2lat.GenHBravais(dmin,ibrav,Abeg)
         Nc = len(HKL)
-        if Nc < len(peaks):
-            A = [x/2 for x in Abeg]
-            continue
         if Nc >= ncMax:
             GoOn = False
         else:
@@ -921,7 +920,7 @@ def monoCellReduce(ibrav,A):
             A = G2lat.cell2A([a,b,cnew,90,beta,90])
     return A
 
-def DoIndexPeaks(peaks,controls,bravais,dlg,ifX20=True):
+def DoIndexPeaks(peaks,controls,bravais,dlg,ifX20=True,timeout=None):
     'needs a doc string'
     
     delt = 0.005                                     #lowest d-spacing cushion - can be fixed?
@@ -933,7 +932,7 @@ def DoIndexPeaks(peaks,controls,bravais,dlg,ifX20=True):
         'Orthorhombic-B','Orthorhombic-C',
         'Orthorhombic-P','Monoclinic-I','Monoclinic-C','Monoclinic-P','Triclinic']
     tries = ['1st','2nd','3rd','4th','5th','6th','7th','8th','9th','10th']
-    N1s = [1,1,1,   5,5,  5,5, 50,50,50,50,50,50,  10,10,10, 200]
+    N1s = [1,1,1,   5,5,  5,5, 50,50,50,50,50,50,  100,100,100, 200]
     N2s = [1,1,1,   2,2,  2,2,     2,2,2,2,2,2,   2,2,2,   4]
     Nm  = [1,1,1,   1,1,  1,1,     1,1,1,1,1,1,   2,2,2,   4]
     notUse = 0
@@ -956,7 +955,7 @@ def DoIndexPeaks(peaks,controls,bravais,dlg,ifX20=True):
             bestM20 = 0
             topM20 = 0
             cycle = 0
-            while cycle < 1:
+            while cycle < 5:
                 if dlg:
                     dlg.Raise()
                     dlg.Update(0,newmsg=tries[cycle]+" cell search for "+bravaisNames[ibrav])
@@ -965,6 +964,9 @@ def DoIndexPeaks(peaks,controls,bravais,dlg,ifX20=True):
                     while GoOn:                                                 #Loop over increment of volume
                         N2 = 0
                         while N2 < N2s[ibrav]:                                  #Table 2 step (iii)               
+                            if time.time() - begin > timeout: 
+                                GoOn = False
+                                break
                             if ibrav > 2:
                                 if not N2:
                                     A = []
@@ -995,12 +997,12 @@ def DoIndexPeaks(peaks,controls,bravais,dlg,ifX20=True):
                                     peaks = IndexPeaks(peaks,HKL)[1]
                                     a,b,c,alp,bet,gam = G2lat.A2cell(A)
                                     V = G2lat.calc_V(A)
-                                    if M20 >= 2.0:
-                                        cell = [M20,X20,ibrav,a,b,c,alp,bet,gam,V,False,False]
+                                    if M20 >= 10.0 and X20 <= 2:
+                                        cell = [M20,X20,ibrav,a,b,c,alp,bet,gam,V,False,False, Nc]
                                         newcell = np.array(cell[3:10])
                                         if not np.allclose(newcell,lastcell):
-                                            print ("%10.3f %3d %3d %10.5f %10.5f %10.5f %10.3f %10.3f %10.3f %10.2f %10.2f"  \
-                                                %(M20,X20,Nc,a,b,c,alp,bet,gam,V,V1))
+                                            print ("%10.3f %3d %3d %10.5f %10.5f %10.5f %10.3f %10.3f %10.3f %10.2f %10.2f %s"  \
+                                                %(M20,X20,Nc,a,b,c,alp,bet,gam,V,V1,bravaisNames[ibrav]))
                                             cells.append(cell)
                                         lastcell = np.array(cell[3:10])
                             if not GoOn:
@@ -1020,7 +1022,7 @@ def DoIndexPeaks(peaks,controls,bravais,dlg,ifX20=True):
                                 if cells:
                                     V1 = cells[0][9]
                                 else:
-                                    V1 = 25
+                                    V1 = controls[3]
                                 ncMax += Nobs
                                 cycle += 1
                                 print ('Restart search, new Max Nc = %d'%ncMax)
@@ -1029,8 +1031,8 @@ def DoIndexPeaks(peaks,controls,bravais,dlg,ifX20=True):
                 finally:
                     pass
 #                dlg.Destroy()
-            print ('%s%s%s%s'%('finished cell search for ',bravaisNames[ibrav], \
-                ', elapsed time = ',G2lat.sec2HMS(time.time()-begin)))
+            print ('%s%s%s%s%s%d'%('finished cell search for ',bravaisNames[ibrav], \
+                ', elapsed time = ',G2lat.sec2HMS(time.time()-begin),' Vfinal ',V1))
             
     if cells:
         return True,dmin,cells
