@@ -1,8 +1,14 @@
 import pickle, random
 import sys
-import GSASIIindex_old as gi
+import GSASIIindex as gi
 from libtbx import easy_mp
 from cctbx import uctbx
+
+import warnings
+warnings.simplefilter("error")
+warnings.warn("mc_cellsearch is not in active use. Currently search_good_peaks" +
+    " is the only option. The Candidate_cell and ..._manager classes are in" +
+    " cell_manager.py.", DeprecationWarning)
 
 
 REFLS = '../d_table.txt'
@@ -17,15 +23,24 @@ NPROC = 60
 
 
 class Candidate_cell(object):
-  def __init__(self, gcell):
-    from cctbx import uctbx
+  def __init__(self, gcell, latt_symbol=None):
+    '''
+    latt_symbol is a 2-letter string, e.g. "mP"
+    '''
+    from cctbx import uctbx, sgtbx
     self.uc = uctbx.unit_cell(gcell[3:9])
+    if latt_symbol: 
+      centering = latt_symbol[1]
+      sg_string = centering + '1'
+      self.sg = sgtbx.space_group(sg_string)
+    else:
+      self.sg = None
     self.hit_count = 1
     self.hits = [gcell]
     self.best_score = self.cumul_score = self.hit_score(gcell)
 
   def matches_cell(self, uc2):
-    return True if self.uc.similarity_transformations(uc2).size() > 0 else False
+    return (self.uc.similarity_transformations(uc2).size() > 0 and self.sg==uc2.sg)
 
   def store_hit(self, gcell):
     self.hits.append(gcell)
@@ -41,6 +56,24 @@ class Candidate_cell(object):
   def hit_score(cls, gcell):
     m20, x20, nc = gcell[0:3]
     return m20/nc/(x20+1)
+
+  def powder_score(self, powder_pattern, d_min):
+    '''Take a list of (d, counts) tuples and return a figure of merit (lower-better)
+    '''
+    assert self.sg is not None
+    from cctbx import miller
+    mig = miller.index_generator(self.uc, self.sg.type(), 0, 0.8*d_min)
+    d_spacings = []
+    for h in mig: d_spacings.append(self.uc.d(h))
+
+    error_cumul = 0
+    for x, y in data:
+      best_match = min(d_spacings, key=lambda d: abs(x-d))
+      error = abs(x-best_match)
+      error_cumul += error*y
+
+    return error_cumul
+    
 
 class Candidate_cell_manager(object):
   def __init__(self):
@@ -152,6 +185,7 @@ def call_gsas(args):
   from the radial average. We will use the full list of known_good plus a
   random sample of refls.
   '''
+
   
   refls = args[0]
   weights = args[1]
@@ -188,9 +222,15 @@ def run():
   with open(KNOWN_GOOD) as f:
     known_good = [float(line.strip()) for line in f.readlines()]
 
+  call_gsas((refls, weights, known_good, None))
+  quit()
 #  import profile
 #  profile.runctx('call_gsas((refls, weights, known_good, None))', globals(), locals(), filename='call_gsas.prof')
 #  quit()
+
+
+
+
   current_cells = easy_mp.parallel_map(
       call_gsas, 
       [(refls, weights, known_good, None) for _ in range(NPROC)], 
