@@ -53,6 +53,7 @@ class Script(object):
     error_cumul = 0
 
     for x, y in data:
+      if x < params.d_min: break
       best_match = min(d_spacings, key=lambda d: abs(x-d))
       error = abs(x-best_match)
       error_cumul += error*y
