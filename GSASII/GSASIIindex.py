@@ -20,35 +20,17 @@ from __future__ import division, print_function
 import math
 import time
 import numpy as np
-import GSASIIpath
-GSASIIpath.SetVersionNumber("$Revision: 4466 $")
 import GSASIIlattice as G2lat
-import GSASIIpwd as G2pwd
-import GSASIIspc as G2spc
-import GSASIImath as G2mth
 import scipy.optimize as so
 from cctbx import sgtbx
 
+
+# This was originally set in GSASIIpwd. I have doubts about the wisdom of 
+# keeping it permanently.
+np.seterr(divide='ignore')
+
 # trig functions in degrees
-sind = lambda x: math.sin(x*math.pi/180.)
-asind = lambda x: 180.*math.asin(x)/math.pi
-tand = lambda x: math.tan(x*math.pi/180.)
-atand = lambda x: 180.*math.atan(x)/math.pi
-atan2d = lambda y,x: 180.*math.atan2(y,x)/math.pi
-cosd = lambda x: math.cos(x*math.pi/180.)
 acosd = lambda x: 180.*math.acos(x)/math.pi
-rdsq2d = lambda x,p: round(1.0/math.sqrt(x),p)
-#numpy versions
-npsind = lambda x: np.sin(x*np.pi/180.)
-npasind = lambda x: 180.*np.arcsin(x)/math.pi
-npcosd = lambda x: np.cos(x*math.pi/180.)
-nptand = lambda x: np.tan(x*math.pi/180.)
-npatand = lambda x: 180.*np.arctan(x)/np.pi
-npatan2d = lambda y,x: 180.*np.arctan2(y,x)/np.pi
-try:  # fails on doc build
-    rpd = np.pi/180.
-except TypeError:
-    pass
     
 def scaleAbyV(A,V):
     'needs a doc string'
@@ -72,12 +54,6 @@ def ran2axis(k,N):
     R = (T-B)*rand.random()+B
     return R
     
-#def ranNaxis(k,N):
-#    import random as rand
-#    T = 1.0+1.0*k/N
-#    B = 1.0-1.0*k/N
-#    R = (T-B)*rand.random()+B
-#    return R
     
 def ranAbyV(Bravais,dmin,dmax,V):
     'needs a doc string'
@@ -203,33 +179,6 @@ def calc_M20(peaks,HKL,ifX20=True):
         M20 /= (1.+X20)
     return M20,X20
     
-def calc_M20SS(peaks,HKL):
-    'needs a doc string'
-    diff = 0
-    X20 = 0
-    for Nobs20,peak in enumerate(peaks):
-        if peak[3]:
-            Qobs = 1.0/peak[8]**2
-            Qcalc = 1.0/peak[9]**2
-            diff += abs(Qobs-Qcalc)
-        elif peak[2]:
-            X20 += 1
-        if Nobs20 == 19: 
-            d20 = peak[8]
-            break
-    else:
-        d20 = peak[8]
-        Nobs20 = len(peaks)
-    for N20,hkl in enumerate(HKL):
-        if hkl[4] < d20:
-            break                
-    Q20 = 1.0/d20**2
-    if diff:
-        M20 = Q20/(2.0*diff)
-    else:
-        M20 = 0
-    M20 /= (1.+X20)
-    return M20,X20
     
 def sortM20(cells):
     'needs a doc string'
@@ -246,81 +195,7 @@ def sortM20(cells):
         X.append(D[key])
     return X
                 
-def sortCells(cells,col):
-    #cells is M20,X20,Bravais,a,b,c,alp,bet,gam,volume
-    #sort smallest a,b,c,alpha,beta,gamma or volume 1st
-    T = []
-    for i,M in enumerate(cells):
-        T.append((M[col],i))
-    D = dict(zip(T,cells))
-    T.sort()
-    X = []
-    for key in T:
-        X.append(D[key])
-    return X
     
-def findMV(peaks,controls,ssopt,Inst,dlg):
-        
-    def Val2Vec(vec,Vref,values):
-        Vec = []
-        i = 0
-        for j,r in enumerate(Vref):
-            if r:
-                if values.size > 1:
-                    Vec.append(max(-1.,min(1.0,values[i])))
-                else:
-                    Vec.append(max(0.0,min(1.0,values)))                    
-                i += 1
-            else:
-                Vec.append(vec[j])
-        return np.array(Vec)  
-     
-    def ZSSfunc(values,peaks,dmin,Inst,SGData,SSGData,vec,Vref,maxH,A,wave,Z,dlg=None):
-        Vec = Val2Vec(vec,Vref,values)
-        HKL =  G2pwd.getHKLMpeak(dmin,Inst,SGData,SSGData,Vec,maxH,A)
-        Peaks = np.array(IndexSSPeaks(peaks,HKL)[1]).T
-        Qo = 1./Peaks[-2]**2
-        Qc = G2lat.calc_rDsqZSS(Peaks[4:8],A,Vec,Z,Peaks[0],wave)
-        chi = np.sum((Qo-Qc)**2)
-        if dlg:
-            dlg.Pulse()    
-        return chi
-        
-    def TSSfunc(values,peaks,dmin,Inst,SGData,SSGData,vec,Vref,maxH,A,difC,Z,dlg=None):
-        Vec = Val2Vec(vec,Vref,values)
-        HKL =  G2pwd.getHKLMpeak(dmin,Inst,SGData,SSGData,Vec,maxH,A)
-        Peaks = np.array(IndexSSPeaks(peaks,HKL)[1]).T
-        Qo = 1./Peaks[-2]**2
-        Qc = G2lat.calc_rDsqTSS(Peaks[4:8],A,Vec,Z,Peaks[0],difC)
-        chi = np.sum((Qo-Qc)**2)
-        if dlg:
-            dlg.Pulse()    
-        return chi
-
-    if 'T' in Inst['Type'][0]:
-        difC = Inst['difC'][1]
-    else:
-        wave = G2mth.getWave(Inst)
-    SGData = G2spc.SpcGroup(controls[13])[1]
-    SSGData = G2spc.SSpcGroup(SGData,ssopt['ssSymb'])[1]
-    A = G2lat.cell2A(controls[6:12])
-    Z = controls[1]
-    Vref = [True if x in ssopt['ssSymb'] else False for x in ['a','b','g']]
-    values = []
-    ranges = []
-    dT = 0.01       #seems to be a good choice
-    for v,r in zip(ssopt['ModVec'],Vref):
-        if r:
-            ranges += [slice(dT,1.-dT,dT),] #NB: unique part for (00g) & (a0g); (abg)?
-            values += [v,]
-    dmin = getDmin(peaks)-0.005
-    if 'T' in Inst['Type'][0]:    
-        result = so.brute(TSSfunc,ranges,finish=so.fmin_cg,full_output=True,
-            args=(peaks,dmin,Inst,SGData,SSGData,ssopt['ModVec'],Vref,1,A,difC,Z,dlg))
-    else:
-        result = so.brute(ZSSfunc,ranges,finish=so.fmin_cg,full_output=True,
-            args=(peaks,dmin,Inst,SGData,SSGData,ssopt['ModVec'],Vref,1,A,wave,Z,dlg))
-    return Val2Vec(ssopt['ModVec'],Vref,result[0]),result
                 
 def IndexPeaks(peaks,HKL):
     'needs a doc string'
@@ -366,56 +241,6 @@ def IndexPeaks(peaks,HKL):
     else:
         return False,peaks  #nothing indexed!
         
-def IndexSSPeaks(peaks,HKL):
-    'needs a doc string'
-    import bisect
-    N = len(HKL)
-    Peaks = np.copy(peaks)
-    if N == 0: return False,Peaks
-    if len(peaks[0]) == 9:      #add m column if missing
-        Peaks = np.insert(Peaks,7,np.zeros_like(Peaks.T[0]),axis=1)
-#        for peak in Peaks:
-#            peak.insert(7,0)
-    hklds = list(np.array(HKL).T[4])+[1000.0,0.0,]
-    hklds.sort()                                        # ascending sort - upper bound at end
-    hklmax = [0,0,0,0]
-    for ipk,peak in enumerate(Peaks):
-        peak[4:8] = [0,0,0,0]                           #clear old indexing
-        peak[9] = 0.
-        if peak[2]: #Use
-            i = bisect.bisect_right(hklds,peak[8])          # find peak position in hkl list
-            dm = peak[8]-hklds[i-1]                         # peak to neighbor hkls in list
-            dp = hklds[i]-peak[8]
-            pos = N-i                                       # reverse the order
-            if dp > dm: pos += 1                            # closer to upper than lower
-            if pos >= N:
-#                print ('%.4f %d'%(pos,N))
-                break
-            hkl = HKL[pos]                                 # put in hkl
-            if hkl[-1] >= 0:                                 # peak already assigned - test if this one better
-                opeak = Peaks[int(hkl[-1])]
-                dold = abs(opeak[-2]-hkl[4])
-                dnew = min(dm,dp)
-                if dold > dnew:                             # new better - zero out old
-                    opeak[4:8] = [0,0,0,0]
-                    opeak[9] = 0.
-                else:                                       # old better - do nothing
-                    continue
-            hkl[-1] = ipk
-            peak[4:8] = hkl[:4]
-            peak[9] = hkl[4]                                # fill in d-calc
-    for peak in Peaks:
-        peak[3] = False
-        if peak[2]:
-            if peak[-1] > 0.:
-                for j in range(4):
-                    if abs(peak[j+4]) > hklmax[j]: hklmax[j] = abs(peak[j+4])
-                peak[3] = True
-    if hklmax[0]*hklmax[1]*hklmax[2]*hklmax[3] > 0:
-        return True,Peaks
-    else:
-        return False,Peaks  #nothing indexed!
-        
 def Values2A(ibrav,values):
     'needs a doc string'
     if ibrav in [0,1,2]:
@@ -444,25 +269,6 @@ def A2values(ibrav,A):
     else:
         return A
         
-def Values2Vec(ibrav,vec,Vref,val):
-    if ibrav in [3,4,5,6]:
-        Nskip = 2
-    elif ibrav in [7,8,9,10,11,12]:
-        Nskip = 3
-    elif ibrav in [13,14,15]:
-        Nskip = 4
-    else:
-        Nskip = 6
-    Vec = []
-    i = 0
-    for j,r in enumerate(Vref):
-        if r:
-            Vec.append(val[i+Nskip])
-            i += 1
-        else:
-            Vec.append(vec[j])
-    return np.array(Vec)  
-
 def FitHKL(ibrav,peaks,A,Pwr):
     'needs a doc string'
                 
@@ -494,203 +300,6 @@ def FitHKL(ibrav,peaks,A,Pwr):
         args=(ibrav,Peaks[7],Peaks[4:7],Pwr))
     A = Values2A(ibrav,result[0])
     return True,np.sum(errFit(result[0],ibrav,Peaks[7],Peaks[4:7],Pwr)**2),A,result
-           
-def errFitZ(values,ibrav,d,H,tth,wave,Z,Zref):
-    Zero = Z
-    if Zref:    
-        Zero = values[-1]
-    A = Values2A(ibrav,values)
-    Qo = 1./d**2
-    Qc = G2lat.calc_rDsqZ(H,A,Zero,tth,wave)
-    return (Qo-Qc)
-    
-def dervFitZ(values,ibrav,d,H,tth,wave,Z,Zref):
-    if ibrav in [0,1,2]:
-        derv = [H[0]*H[0]+H[1]*H[1]+H[2]*H[2],]
-    elif ibrav in [3,4,]:
-        derv = [H[0]*H[0]+H[1]*H[1]+H[0]*H[1],H[2]*H[2]]
-    elif ibrav in [5,6]:
-        derv = [H[0]*H[0]+H[1]*H[1],H[2]*H[2]]
-    elif ibrav in [7,8,9,10,11,12]:
-        derv = [H[0]*H[0],H[1]*H[1],H[2]*H[2]]
-    elif ibrav in [13,14,15]:
-        derv = [H[0]*H[0],H[1]*H[1],H[2]*H[2],H[0]*H[2]]
-    else:
-        derv = [H[0]*H[0],H[1]*H[1],H[2]*H[2],H[0]*H[1],H[0]*H[2],H[1]*H[2]]
-    if Zref:
-        derv.append(npsind(tth)*2.0*rpd/wave**2)
-    derv = -np.array(derv)
-    return derv.T
-    
-def FitHKLZ(wave,ibrav,peaks,A,Z,Zref):
-    'needs a doc string'
-    
-    Peaks = np.array(peaks).T   
-    values = A2values(ibrav,A)
-    if Zref:
-        values.append(Z)
-#TODO: try Hessian refinement here - might improve things
-#    result = G2mth.HessianLSQ(errFitZ,values,Hess=peakHess,        #would need "peakHess" routine; returns vec & Hess
-#        args=(ibrav,Peaks[7],Peaks[4:7],Peaks[0],wave,Z,Zref]),ftol=.01,maxcyc=10)
-    result = so.leastsq(errFitZ,values,Dfun=dervFitZ,full_output=True,ftol=0.0001,
-        args=(ibrav,Peaks[7],Peaks[4:7],Peaks[0],wave,Z,Zref))
-    A = Values2A(ibrav,result[0][:6])
-    if Zref:
-        Z = result[0][-1]
-    chisq = np.sum(errFitZ(result[0],ibrav,Peaks[7],Peaks[4:7],Peaks[0],wave,Z,Zref)**2)
-    return True,chisq,A,Z,result
-    
-def errFitZSS(values,ibrav,d,H,tth,wave,vec,Vref,Z,Zref):
-    Zero = Z
-    if Zref:    
-        Zero = values[-1]
-    A = Values2A(ibrav,values)
-    Vec = Values2Vec(ibrav,vec,Vref,values)
-    Qo = 1./d**2
-    Qc = G2lat.calc_rDsqZSS(H,A,Vec,Zero,tth,wave)
-    return (Qo-Qc)
-    
-def dervFitZSS(values,ibrav,d,H,tth,wave,vec,Vref,Z,Zref):
-    A = Values2A(ibrav,values)
-    Vec = Values2Vec(ibrav,vec,Vref,values)
-    HM = H[:3]+(H[3][:,np.newaxis]*Vec).T
-    if ibrav in [3,4,]:
-        derv = [HM[0]*HM[0]+HM[1]*HM[1]+HM[0]*HM[1],HM[2]*HM[2]]
-    elif ibrav in [5,6]:
-        derv = [HM[0]*HM[0]+HM[1]*HM[1],HM[2]*HM[2]]
-    elif ibrav in [7,8,9,10,11,12]:
-        derv = [HM[0]*HM[0],HM[1]*HM[1],HM[2]*HM[2]]
-    elif ibrav in [13,14,15]:
-        derv = [HM[0]*HM[0],HM[1]*HM[1],HM[2]*HM[2],HM[0]*HM[2]]
-    else:
-        derv = [HM[0]*HM[0],HM[1]*HM[1],HM[2]*HM[2],HM[0]*HM[1],HM[0]*HM[2],HM[1]*HM[2]]
-    if Vref[0]:
-        derv.append(2.*A[0]*HM[0]*H[3]+A[3]*HM[1]*H[3]+A[4]*HM[2]*H[3])
-    if Vref[1]:
-        derv.append(2.*A[1]*HM[1]*H[3]+A[3]*HM[0]*H[3]+A[5]*HM[2]*H[3])
-    if Vref[2]:
-        derv.append(2.*A[2]*HM[2]*H[3]+A[4]*HM[1]*H[3]+A[5]*HM[0]*H[3])    
-    if Zref:
-        derv.append(npsind(tth)*2.0*rpd/wave**2)
-    derv = -np.array(derv)
-    return derv.T
-    
-def FitHKLZSS(wave,ibrav,peaks,A,V,Vref,Z,Zref):
-    'needs a doc string'
-    
-    Peaks = np.array(peaks).T    
-    values = A2values(ibrav,A)
-    for v,r in zip(V,Vref):
-        if r:
-            values.append(v)
-    if Zref:
-        values.append(Z)
-    result = so.leastsq(errFitZSS,values,Dfun=dervFitZSS,full_output=True,ftol=1.e-6,
-        args=(ibrav,Peaks[8],Peaks[4:8],Peaks[0],wave,V,Vref,Z,Zref))
-    A = Values2A(ibrav,result[0])
-    Vec = Values2Vec(ibrav,V,Vref,result[0])
-    if Zref:
-        Z = result[0][-1]
-    chisq = np.sum(errFitZSS(result[0],ibrav,Peaks[8],Peaks[4:8],Peaks[0],wave,Vec,Vref,Z,Zref)**2) 
-    return True,chisq,A,Vec,Z,result
-    
-def errFitT(values,ibrav,d,H,tof,difC,Z,Zref):
-    Zero = Z
-    if Zref:    
-        Zero = values[-1]
-    A = Values2A(ibrav,values)
-    Qo = 1./d**2
-    Qc = G2lat.calc_rDsqT(H,A,Zero,tof,difC)
-    return (Qo-Qc)
-    
-def dervFitT(values,ibrav,d,H,tof,difC,Z,Zref):
-    if ibrav in [0,1,2]:
-        derv = [H[0]*H[0]+H[1]*H[1]+H[2]*H[2],]
-    elif ibrav in [3,4,]:
-        derv = [H[0]*H[0]+H[1]*H[1]+H[0]*H[1],H[2]*H[2]]
-    elif ibrav in [5,6]:
-        derv = [H[0]*H[0]+H[1]*H[1],H[2]*H[2]]
-    elif ibrav in [7,8,9,10,11,12]:
-        derv = [H[0]*H[0],H[1]*H[1],H[2]*H[2]]
-    elif ibrav in [13,14,15]:
-        derv = [H[0]*H[0],H[1]*H[1],H[2]*H[2],H[0]*H[2]]
-    else:
-        derv = [H[0]*H[0],H[1]*H[1],H[2]*H[2],H[0]*H[1],H[0]*H[2],H[1]*H[2]]
-    if Zref:
-        derv.append(np.ones_like(d)/difC)
-    derv = np.array(derv)
-    return derv.T
-    
-def FitHKLT(difC,ibrav,peaks,A,Z,Zref):
-    'needs a doc string'
-    
-    Peaks = np.array(peaks).T    
-    values = A2values(ibrav,A)
-    if Zref:
-        values.append(Z)
-    result = so.leastsq(errFitT,values,Dfun=dervFitT,full_output=True,ftol=0.0001,
-        args=(ibrav,Peaks[7],Peaks[4:7],Peaks[0],difC,Z,Zref))
-    A = Values2A(ibrav,result[0])
-    if Zref:
-        Z = result[0][-1]
-    chisq = np.sum(errFitT(result[0],ibrav,Peaks[7],Peaks[4:7],Peaks[0],difC,Z,Zref)**2)
-    return True,chisq,A,Z,result
-    
-def errFitTSS(values,ibrav,d,H,tof,difC,vec,Vref,Z,Zref):
-    Zero = Z
-    if Zref:    
-        Zero = values[-1]
-    A = Values2A(ibrav,values)
-    Vec = Values2Vec(ibrav,vec,Vref,values)
-    Qo = 1./d**2
-    Qc = G2lat.calc_rDsqTSS(H,A,Vec,Zero,tof,difC)
-    return (Qo-Qc)
-    
-def dervFitTSS(values,ibrav,d,H,tof,difC,vec,Vref,Z,Zref):
-    A = Values2A(ibrav,values)
-    Vec = Values2Vec(ibrav,vec,Vref,values)
-    HM = H[:3]+(H[3][:,np.newaxis]*Vec).T
-    if ibrav in [3,4,]:
-        derv = [HM[0]*HM[0]+HM[1]*HM[1]+HM[0]*HM[1],HM[2]*HM[2]]
-    elif ibrav in [5,6]:
-        derv = [HM[0]*HM[0]+HM[1]*HM[1],HM[2]*HM[2]]
-    elif ibrav in [7,8,9,10,11,12]:
-        derv = [HM[0]*HM[0],HM[1]*HM[1],HM[2]*HM[2]]
-    elif ibrav in [13,14,15]:
-        derv = [HM[0]*HM[0],HM[1]*HM[1],HM[2]*HM[2],HM[0]*HM[2]]
-    else:
-        derv = [HM[0]*HM[0],HM[1]*HM[1],HM[2]*HM[2],HM[0]*HM[1],HM[0]*HM[2],HM[1]*HM[2]]
-    if Vref[0]:
-        derv.append(2.*A[0]*HM[0]*H[3]+A[3]*HM[1]*H[3]+A[4]*HM[2]*H[3])
-    if Vref[1]:
-        derv.append(2.*A[1]*HM[1]*H[3]+A[3]*HM[0]*H[3]+A[5]*HM[2]*H[3])
-    if Vref[2]:
-        derv.append(2.*A[2]*HM[2]*H[3]+A[4]*HM[1]*H[3]+A[5]*HM[0]*H[3])    
-    if Zref:
-        derv.append(np.ones_like(d)/difC)
-    derv = np.array(derv)
-    return derv.T
-    
-def FitHKLTSS(difC,ibrav,peaks,A,V,Vref,Z,Zref):
-    'needs a doc string'
-    
-    Peaks = np.array(peaks).T    
-    values = A2values(ibrav,A)
-    for v,r in zip(V,Vref):
-        if r:
-            values.append(v)
-    if Zref:
-        values.append(Z)
-    print(values)
-    result = so.leastsq(errFitTSS,values,Dfun=dervFitTSS,full_output=True,ftol=0.0001,
-        args=(ibrav,Peaks[8],Peaks[4:8],Peaks[0],difC,V,Vref,Z,Zref))
-    print(result)
-    A = Values2A(ibrav,result[0])
-    Vec = Values2Vec(ibrav,V,Vref,result[0])
-    if Zref:
-        Z = result[0][-1]
-    chisq = np.sum(errFitTSS(result[0],ibrav,Peaks[8],Peaks[4:8],Peaks[0],difC,V,Vref,Z,Zref)**2)
-    return True,chisq,A,Vec,Z,result
                
 def rotOrthoA(A):
     'needs a doc string'
@@ -738,54 +347,6 @@ def getDmax(peaks):
     'needs a doc string'
     return peaks[0][-2]
     
-def refinePeaksZ(peaks,wave,ibrav,A,Zero,ZeroRef):
-    'needs a doc string'
-    dmin = getDmin(peaks)
-    OK,smin,Aref,Z,result = FitHKLZ(wave,ibrav,peaks,A,Zero,ZeroRef)
-    Peaks = np.array(peaks).T
-    H = Peaks[4:7]
-    Peaks[8] = 1./np.sqrt(G2lat.calc_rDsqZ(H,Aref,Z,Peaks[0],wave))
-    peaks = Peaks.T    
-    HKL = G2lat.GenHBravais(dmin,ibrav,A)
-    M20,X20 = calc_M20(peaks,HKL)
-    return len(HKL),M20,X20,Aref,Z
-    
-def refinePeaksT(peaks,difC,ibrav,A,Zero,ZeroRef):
-    'needs a doc string'
-    dmin = getDmin(peaks)
-    OK,smin,Aref,Z,result = FitHKLT(difC,ibrav,peaks,A,Zero,ZeroRef)
-    Peaks = np.array(peaks).T
-    H = Peaks[4:7]
-    Peaks[8] = 1./np.sqrt(G2lat.calc_rDsqT(H,Aref,Z,Peaks[0],difC))
-    peaks = Peaks.T    
-    HKL = G2lat.GenHBravais(dmin,ibrav,A)
-    M20,X20 = calc_M20(peaks,HKL)
-    return len(HKL),M20,X20,Aref,Z
-    
-def refinePeaksZSS(peaks,wave,Inst,SGData,SSGData,maxH,ibrav,A,vec,vecRef,Zero,ZeroRef):
-    'needs a doc string'
-    dmin = getDmin(peaks)
-    OK,smin,Aref,Vref,Z,result = FitHKLZSS(wave,ibrav,peaks,A,vec,vecRef,Zero,ZeroRef)
-    Peaks = np.array(peaks).T
-    H = Peaks[4:8]
-    Peaks[9] = 1./np.sqrt(G2lat.calc_rDsqZSS(H,Aref,Vref,Z,Peaks[0],wave))  #H,A,vec,Z,tth,lam
-    peaks = Peaks.T    
-    HKL =  G2pwd.getHKLMpeak(dmin,Inst,SGData,SSGData,Vref,maxH,Aref)
-    M20,X20 = calc_M20SS(peaks,HKL)
-    return len(HKL),M20,X20,Aref,Vref,Z
-    
-def refinePeaksTSS(peaks,difC,Inst,SGData,SSGData,maxH,ibrav,A,vec,vecRef,Zero,ZeroRef):
-    'needs a doc string'
-    dmin = getDmin(peaks)
-    OK,smin,Aref,Vref,Z,result = FitHKLTSS(difC,ibrav,peaks,A,vec,vecRef,Zero,ZeroRef)
-    Peaks = np.array(peaks).T
-    H = Peaks[4:8]
-    Peaks[9] = 1./np.sqrt(G2lat.calc_rDsqTSS(H,Aref,Vref,Z,Peaks[0],difC))
-    peaks = Peaks.T    
-    HKL =  G2pwd.getHKLMpeak(dmin,Inst,SGData,SSGData,Vref,maxH,Aref)
-    HKL = G2lat.GenHBravais(dmin,ibrav,A)
-    M20,X20 = calc_M20SS(peaks,HKL)
-    return len(HKL),M20,X20,Aref,Vref,Z
     
 def refinePeaks(peaks,ibrav,A,ifX20=True):
     'needs a doc string'
@@ -1040,128 +601,3 @@ def DoIndexPeaks(peaks,controls,bravais,dlg,ifX20=True,timeout=None):
         return False,0,[]
         
         
-NeedTestData = True
-def TestData():
-    'needs a doc string'
-    global NeedTestData
-    NeedTestData = False
-    global TestData
-    TestData = [14, [7.,8.70,10.86,90.,102.95,90.], [7.76006,8.706215,10.865679,90.,102.947,90.],3,
-        [[2.176562137832974, 761.60902227696033, True, True, 0, 0, 1, 10.591300714328161, 10.589436], 
-        [3.0477561489789498, 4087.2956049071572, True, True, 1, 0, 0, 7.564238997554908, 7.562777], 
-        [3.3254921120068524, 1707.0253890991009, True, True, 1, 0, -1, 6.932650301411212, 6.932718], 
-        [3.428121546163426, 2777.5082170150563, True, True, 0, 1, 1, 6.725163158013632, 6.725106], 
-        [4.0379791325512118, 1598.4321673135987, True, True, 1, 1, 0, 5.709789097440156, 5.70946], 
-        [4.2511182350743937, 473.10955149057577, True, True, 1, 1, -1, 5.423637972781876, 5.42333], 
-        [4.354684330373451, 569.88528280256071, True, True, 0, 0, 2, 5.2947091882172534, 5.294718],
-        [4.723324574319177, 342.73882372499997, True, True, 1, 0, -2, 4.881681587039431, 4.881592], 
-        [4.9014773581253994, 5886.3516356615492, True, True, 1, 1, 1, 4.704350709093183, 4.70413], 
-        [5.0970774474587275, 3459.7541692903033, True, True, 0, 1, 2, 4.523933797797693, 4.523829], 
-        [5.2971997607389518, 1290.0229964239879, True, True, 0, 2, 0, 4.353139557169142, 4.353108], 
-        [5.4161306205553847, 1472.5726977257755, True, True, 1, 1, -2, 4.257619398422479, 4.257944], 
-        [5.7277364698554161, 1577.8791668322888, True, True, 0, 2, 1, 4.026169751907777, 4.026193], 
-        [5.8500213058834163, 420.74210142657131, True, True, 1, 0, 2, 3.9420803081518443, 3.942219],
-        [6.0986764166731708, 163.02160537058708, True, True, 2, 0, 0, 3.7814965150452537, 3.781389], 
-        [6.1126665157702753, 943.25461245706833, True, True, 1, 2, 0, 3.772849962062199, 3.772764], 
-        [6.2559260555056957, 250.55355015505376, True, True, 1, 2, -1, 3.6865353266375283, 3.686602], 
-        [6.4226243128279892, 5388.5560141098349, True, True, 1, 1, 2, 3.5909481979190283, 3.591214], 
-        [6.5346132446561134, 1951.6070344509026, True, True, 0, 0, 3, 3.5294722429440584, 3.529812], 
-        [6.5586952135236443, 259.65938178131034, True, True, 2, 1, -1, 3.516526936765838, 3.516784], 
-        [6.6509216222783722, 93.265376597376573, True, True, 2, 1, 0, 3.4678179073694952, 3.468369], 
-        [6.7152737044107722, 289.39386813803162, True, True, 1, 2, 1, 3.4346235125812807, 3.434648], 
-        [6.8594130457361899, 603.54959764648322, True, True, 0, 2, 2, 3.362534044860622, 3.362553], 
-        [7.0511627728884454, 126.43246447656593, True, True, 0, 1, 3, 3.2712038721790675, 3.271181], 
-        [7.077700845503319, 125.49742760019636, True, True, 1, 1, -3, 3.2589538988480626, 3.259037], 
-        [7.099393757363675, 416.55444885434633, True, True, 1, 2, -2, 3.2490085228959193, 3.248951], 
-        [7.1623933278642742, 369.27397110921817, True, True, 2, 1, -2, 3.2204673608202383, 3.220487], 
-        [7.4121734953058924, 482.84120827021826, True, True, 2, 1, 1, 3.1120858221599876, 3.112308]]
-        ]
-    global TestData2
-    TestData2 = [14, [0.15336547830008007, 0.017345499139401827, 0.008122368657493792, 0, 0.02893538955687591, 0], 3,
-        [[2.176562137832974, 761.6090222769603, True, True, 0, 0, 1, 10.591300714328161, 11.095801], 
-        [3.0477561489789498, 4087.295604907157, True, True, 0, 1, 0, 7.564238997554908, 7.592881], 
-        [3.3254921120068524, 1707.025389099101, True, False, 0, 0, 0, 6.932650301411212, 0.0], 
-        [3.428121546163426, 2777.5082170150563, True, True, 0, 1, 1, 6.725163158013632, 6.266192], 
-        [4.037979132551212, 1598.4321673135987, True, False, 0, 0, 0, 5.709789097440156, 0.0], 
-        [4.251118235074394, 473.10955149057577, True, True, 0, 0, 2, 5.423637972781876, 5.5479], 
-        [4.354684330373451, 569.8852828025607, True, True, 0, 0, 2, 5.2947091882172534, 5.199754], 
-        [4.723324574319177, 342.738823725, True, False, 0, 0, 0, 4.881681587039431, 0.0], 
-        [4.901477358125399, 5886.351635661549, True, False, 0, 0, 0, 4.704350709093183, 0.0], 
-        [5.0970774474587275, 3459.7541692903033, True, True, 0, 1, 2, 4.523933797797693, 4.479534], 
-        [5.297199760738952, 1290.022996423988, True, True, 0, 1, 0, 4.353139557169142, 4.345087],
-        [5.416130620555385, 1472.5726977257755, True, False, 0, 0, 0, 4.257619398422479, 0.0], 
-        [5.727736469855416, 1577.8791668322888, True, False, 0, 0, 0, 4.026169751907777, 0.0], 
-        [5.850021305883416, 420.7421014265713, True, False, 0, 0, 0, 3.9420803081518443, 0.0], 
-        [6.098676416673171, 163.02160537058708, True, True, 0, 2, 0, 3.7814965150452537, 3.796441], 
-        [6.112666515770275, 943.2546124570683, True, False, 0, 0, 0, 3.772849962062199, 0.0], 
-        [6.255926055505696, 250.55355015505376, True, True, 0, 0, 3, 3.6865353266375283, 3.6986], 
-        [6.422624312827989, 5388.556014109835, True, True, 0, 2, 1, 3.5909481979190283, 3.592005], 
-        [6.534613244656113, 191.6070344509026, True, True, 1, 0, -1, 3.5294722429440584, 3.546166], 
-        [6.558695213523644, 259.65938178131034, True, True, 0, 0, 3, 3.516526936765838, 3.495428], 
-        [6.650921622278372, 93.26537659737657, True, True, 0, 0, 3, 3.4678179073694952, 3.466503], 
-        [6.715273704410772, 289.3938681380316, True, False, 0, 0, 0, 3.4346235125812807, 0.0], 
-        [6.85941304573619, 603.5495976464832, True, True, 0, 1, 3, 3.362534044860622, 3.32509], 
-        [7.051162772888445, 126.43246447656593, True, True, 0, 1, 2, 3.2712038721790675, 3.352121], 
-        [7.077700845503319, 125.49742760019636, True, False, 0, 0, 0, 3.2589538988480626, 0.0], 
-        [7.099393757363675, 416.55444885434633, True, False, 0, 0, 0, 3.2490085228959193, 0.0], 
-        [7.162393327864274, 369.27397110921817, True, False, 0, 0, 0, 3.2204673608202383, 0.0], 
-        [7.412173495305892, 482.84120827021826, True, True, 0, 2, 2, 3.112085822159976, 3.133096]]
-        ]
-#
-def test0():
-    if NeedTestData: TestData()
-    ibrav,cell,bestcell,Pwr,peaks = TestData
-    print ('best cell:',bestcell)
-    print ('old cell:',cell)
-    Peaks = np.array(peaks)
-    HKL = Peaks[4:7]
-    print (calc_M20(peaks,HKL))
-    A = G2lat.cell2A(cell)
-    OK,smin,A,result = FitHKL(ibrav,peaks,A,Pwr)
-    print ('new cell:',G2lat.A2cell(A))    
-    print ('x:',result[0])
-    print ('cov_x:',result[1])
-    print ('infodict:')
-    for item in result[2]:
-        print (item,result[2][item])
-    print ('msg:',result[3])
-    print ('ier:',result[4])
-    result = refinePeaks(peaks,ibrav,A)
-    N,M20,X20,A = result
-    print ('refinePeaks:',N,M20,X20,G2lat.A2cell(A))
-    print ('compare bestcell:',bestcell)
-#
-def test1():
-    if NeedTestData: TestData()
-    ibrav,A,Pwr,peaks = TestData2
-    print ('bad cell:',G2lat.A2cell(A))
-    print ('FitHKL')
-    OK,smin,A,result = FitHKL(ibrav,peaks,A,Pwr)
-    result = refinePeaks(peaks,ibrav,A)
-    N,M20,X20,A = result
-    print ('refinePeaks:',N,M20,X20,A)
-#    Peaks = np.array(peaks)
-#    HKL = Peaks[4:7]
-#    print calc_M20(peaks,HKL)
-#    OK,smin,A,result = FitHKL(ibrav,peaks,A,Pwr)
-#    print 'new cell:',G2lat.A2cell(A)    
-#    print 'x:',result[0]
-#    print 'cov_x:',result[1]
-#    print 'infodict:'
-#    for item in result[2]:
-#        print item,result[2][item]
-#    print 'msg:',result[3]
-#    print 'ier:',result[4]
-    
-#
-if __name__ == '__main__':
-    test0()
-    test1()
-#    test2()
-#    test3()
-#    test4()
-#    test5()
-#    test6()
-#    test7()
-#    test8()
-    print ("OK")
